@@ -95,21 +95,26 @@ def main():
         while True:
 
             ### Displaying current data spread ###
-            rows = [entry['audio_analysis'][0] for entry in save_dict.values()]
-            audio_emotions = [(row['valence'], row['energy']) for row in rows]
-            valences, energies = zip(*audio_emotions)
-            avg_valence, std_valence = np.average(valences), np.std(valences)
-            avg_energy, std_energy = np.average(energies), np.std(energies)
-            spread_dict = {
-                'avg_valence': avg_valence,
-                'std_valence': std_valence,
-                'avg_energy': avg_energy,
-                'std_energy': std_energy,
-                'data_length': len(audio_emotions)
-            }
-            data_spread_msg = '\nCurrent Data Spread:\n' + \
-                pprint.pformat(spread_dict)
-            BoardShim.log_message(LogLevels.LEVEL_INFO.value, data_spread_msg)
+            if len(save_dict):
+                rows = [entry['audio_analysis'][0]
+                        for entry in save_dict.values()]
+                audio_emotions = [(row['valence'], row['energy'])
+                                  for row in rows]
+                valences, energies = zip(*audio_emotions)
+                avg_valence, std_valence = np.average(
+                    valences), np.std(valences)
+                avg_energy, std_energy = np.average(energies), np.std(energies)
+                spread_dict = {
+                    'avg_valence': avg_valence,
+                    'std_valence': std_valence,
+                    'avg_energy': avg_energy,
+                    'std_energy': std_energy,
+                    'data_length': len(audio_emotions)
+                }
+                data_spread_msg = '\nCurrent Data Spread:\n' + \
+                    pprint.pformat(spread_dict)
+                BoardShim.log_message(
+                    LogLevels.LEVEL_INFO.value, data_spread_msg)
 
             BoardShim.log_message(LogLevels.LEVEL_INFO.value,
                                   'Waiting for Spotify to start')
