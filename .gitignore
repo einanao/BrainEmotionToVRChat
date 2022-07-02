@@ -1,2 +1,2 @@
-ml-spotify/recording.pkl
+ml-spotify/*.pkl
 **/*.cache
