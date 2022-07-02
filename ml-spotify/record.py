@@ -3,6 +3,7 @@ import time
 import pickle
 import os.path as osp
 import numpy as np
+import pprint
 
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, LogLevels
 from brainflow.data_filter import DataFilter, DetrendOperations
@@ -93,20 +94,38 @@ def main():
         BoardShim.log_message(LogLevels.LEVEL_INFO.value, 'Main Loop Started')
         while True:
 
+            ### Displaying current data spread ###
+            rows = [entry['audio_analysis'][0] for entry in save_dict.values()]
+            audio_emotions = [(row['valence'], row['energy']) for row in rows]
+            valences, energies = zip(*audio_emotions)
+            avg_valence, std_valence = np.average(valences), np.std(valences)
+            avg_energy, std_energy = np.average(energies), np.std(energies)
+            spread_dict = {
+                'avg_valence': avg_valence,
+                'std_valence': std_valence,
+                'avg_energy': avg_energy,
+                'std_energy': std_energy,
+                'data_length': len(audio_emotions)
+            }
+            data_spread_msg = '\nCurrent Data Spread:\n' + \
+                pprint.pformat(spread_dict)
+            BoardShim.log_message(LogLevels.LEVEL_INFO.value, data_spread_msg)
+
             BoardShim.log_message(LogLevels.LEVEL_INFO.value,
                                   'Waiting for Spotify to start')
+            duration = float("inf")
             while True:
                 current_track = sp.current_user_playing_track()
-                if current_track and current_track['is_playing']:
-                    break
+                if current_track:
+                    progress_ms = current_track['progress_ms']
+                    tid = current_track['item']['id']
+                    name = current_track['item']['name']
+                    duration_ms = current_track['item']['duration_ms']
+                    duration = (duration_ms - progress_ms) / 1000
+                    if current_track['is_playing'] and duration > 0:
+                        break
                 else:
                     time.sleep(1)
-
-            progress_ms = current_track['progress_ms']
-            tid = current_track['item']['id']
-            name = current_track['item']['name']
-            duration_ms = current_track['item']['duration_ms']
-            duration = (duration_ms - progress_ms) / 1000
 
             log_msg = 'Getting audio features for song {}'.format(name)
             BoardShim.log_message(LogLevels.LEVEL_INFO.value, log_msg)
