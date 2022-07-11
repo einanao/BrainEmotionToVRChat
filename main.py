@@ -1,10 +1,11 @@
 import argparse
 import time
 import enum
+import math
 import numpy as np
 
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, LogLevels, BoardIds
-from brainflow.data_filter import DataFilter, DetrendOperations
+from brainflow.data_filter import DataFilter, DetrendOperations, FilterTypes
 
 from pythonosc.udp_client import SimpleUDPClient
 from scipy.signal import find_peaks
@@ -24,6 +25,7 @@ class OSC_Path:
     Battery = '/avatar/parameters/osc_battery_lvl'
     HeartBps = '/avatar/parameters/osc_heart_bps'
     HeartBpm = '/avatar/parameters/osc_heart_bpm'
+    ConnectionStatus = '/avatar/parameters/osc_is_connected'
 
 
 def tanh_normalize(data, scale, offset):
@@ -47,7 +49,7 @@ def main():
     DataFilter.enable_data_logger()
 
     ### Uncomment this to see debug messages ###
-    # BoardShim.set_log_level(LogLevels.LEVEL_DEBUG.value)
+    BoardShim.set_log_level(LogLevels.LEVEL_DEBUG.value)
 
     ### Paramater Setting ###
     parser = argparse.ArgumentParser()
@@ -92,10 +94,25 @@ def main():
     send_port = 9000
     osc_client = SimpleUDPClient(ip, send_port)
 
+    ### Biosensor board setup ###
+    board = BoardShim(args.board_id, params)
+    master_board_id = board.get_board_id()
+    eeg_channels = tryFunc(BoardShim.get_eeg_channels, master_board_id)
+    sampling_rate = tryFunc(BoardShim.get_sampling_rate, master_board_id)
+    battery_channel = tryFunc(BoardShim.get_battery_channel, master_board_id)
+    ppg_channels = tryFunc(BoardShim.get_ppg_channels, master_board_id)
+    time_channel = tryFunc(BoardShim.get_timestamp_channel, master_board_id)
+    board.prepare_session()
+
+    ### Biosensor device specific commands ###
+    if master_board_id == BoardIds.MUSE_2_BOARD or master_board_id == BoardIds.MUSE_S_BOARD:
+        board.config_board('p52')
+
     ### EEG Band Calculation Params ###
     current_focus = 0
     current_relax = 0
     current_value = np.array([current_focus, current_relax])
+    eeg_window_size = 2
 
     # normalize ratios between -1 and 1.
     # Ratios are centered around 1.0. Tune scale to taste
@@ -106,28 +123,23 @@ def main():
     smoothing_weight = 0.05
     detrend_eeg = True
 
-    ### EEG board setup ###
-    board = BoardShim(args.board_id, params)
-    master_board_id = board.get_board_id()
-    eeg_channels = tryFunc(BoardShim.get_eeg_channels, master_board_id)
-    sampling_rate = tryFunc(BoardShim.get_sampling_rate, master_board_id)
-    battery_channel = tryFunc(BoardShim.get_battery_channel, master_board_id)
-    ppg_channels = tryFunc(BoardShim.get_ppg_channels, master_board_id)
-    board.prepare_session()
+    ### PPG Params ###
+    heart_window_size = 10
+    heart_min_dist = 0.35
+    heart_lowpass_cutoff = 2
+    heart_lowpass_order = 2
+    heart_lowpass_ripple = 0
 
-    ### Device specific commands ###
-    if master_board_id == BoardIds.MUSE_2_BOARD or master_board_id == BoardIds.MUSE_S_BOARD:
-        board.config_board('p50')
-
-    ### EEG Streaming Params ###
-    eeg_window_size = 2
-    heart_window_size = 5
-    update_speed = (250 - 3) * 0.001  # 4Hz update rate for VRChat OSC
+    ### Streaming Params ###
+    update_speed = 1 / 4  # 4Hz update rate for VRChat OSC
+    ring_buffer_size = max(eeg_window_size, heart_window_size) * sampling_rate
+    startup_time = 5
+    board_timeout = 5
 
     try:
         BoardShim.log_message(LogLevels.LEVEL_INFO.value, 'Intializing')
-        board.start_stream(450000, args.streamer_params)
-        time.sleep(5)
+        board.start_stream(ring_buffer_size, args.streamer_params)
+        time.sleep(startup_time)
 
         BoardShim.log_message(LogLevels.LEVEL_INFO.value, 'Main Loop Started')
         while True:
@@ -135,7 +147,18 @@ def main():
                 LogLevels.LEVEL_DEBUG.value, "Getting Board Data")
             data = board.get_current_board_data(
                 eeg_window_size * sampling_rate)
+
+            BoardShim.log_message(LogLevels.LEVEL_DEBUG.value, "Timeout Check")
+            time_data = data[time_channel]
+            last_sample_time = time_data[-1]
+            current_time = time.time()
+            if current_time - last_sample_time > board_timeout:
+                raise TimeoutError("Biosensor board timed out")
+
             battery_level = None if not battery_channel else data[battery_channel][-1]
+            if battery_level:
+                BoardShim.log_message(
+                    LogLevels.LEVEL_DEBUG.value, "Battery: {}".format(battery_level))
 
             ### START EEG SECTION ###
             BoardShim.log_message(
@@ -168,27 +191,47 @@ def main():
             ### END EEG SECTION ###
 
             ### START PPG SECTION ###
-            if ppg_channels:
+            if ppg_channels and time_channel:
                 BoardShim.log_message(
-                    LogLevels.LEVEL_DEBUG.value, "Calculating BPM")
+                    LogLevels.LEVEL_DEBUG.value, "Get PPG Data")
                 data = board.get_current_board_data(
                     heart_window_size * sampling_rate)
+                time_data = data[time_channel]
                 ir_data_channel = ppg_channels[1]
-                ir_data = data[ir_data_channel]
-                peaks, _ = find_peaks(ir_data)
-                # divide by magic number 4, not sure why this works
-                heart_bps = len(ir_data) / len(peaks) / 4
-                heart_bpm = int(heart_bps * 60 + 0.5)
+                ambient_channel = ppg_channels[0]
+
                 BoardShim.log_message(
-                    LogLevels.LEVEL_DEBUG.value, "BPS: {:.3f}\tBPM: {}".format(heart_bps, heart_bpm))
+                    LogLevels.LEVEL_DEBUG.value, "Clean PPG Signals")
+                ir_data = data[ir_data_channel] - data[ambient_channel]
+                ambient_filter = list(map(lambda sample: sample > 0, ir_data))
+                ir_data = ir_data[ambient_filter]
+                DataFilter.perform_lowpass(
+                    ir_data, sampling_rate, heart_lowpass_cutoff, heart_lowpass_order, FilterTypes.BUTTERWORTH.value, heart_lowpass_ripple)
+
+                BoardShim.log_message(
+                    LogLevels.LEVEL_DEBUG.value, "Find PPG Peaks")
+                peaks, _ = find_peaks(
+                    ir_data, distance=sampling_rate * heart_min_dist)
+                peaks = peaks[1:-1]
+
+                BoardShim.log_message(
+                    LogLevels.LEVEL_DEBUG.value, "Calculate Heart Rate")
+                heart_bps = 1 / np.mean(np.diff(time_data[peaks]))
+                if not math.isnan(heart_bps):
+                    heart_bpm = int(heart_bps * 60 + 0.5)
+                    BoardShim.log_message(
+                        LogLevels.LEVEL_DEBUG.value, "BPS: {:.3f}\tBPM: {}".format(heart_bps, heart_bpm))
+                else:
+                    heart_bps = None
             ### END PPG SECTION ###
 
             BoardShim.log_message(LogLevels.LEVEL_DEBUG.value, "Sending")
             osc_client.send_message(OSC_Path.Focus, current_focus)
             osc_client.send_message(OSC_Path.Relax, current_relax)
+            osc_client.send_message(OSC_Path.ConnectionStatus, True)
             if battery_level:
                 osc_client.send_message(OSC_Path.Battery, battery_level)
-            if ppg_channels:
+            if ppg_channels and heart_bps:
                 osc_client.send_message(OSC_Path.HeartBps, heart_bps)
                 osc_client.send_message(OSC_Path.HeartBpm, heart_bpm)
 
@@ -197,7 +240,11 @@ def main():
 
     except KeyboardInterrupt:
         BoardShim.log_message(LogLevels.LEVEL_INFO.value, 'Shutting down')
+    except TimeoutError:
+        BoardShim.log_message(LogLevels.LEVEL_INFO.value,
+                              'Biosensor board timed out')
     finally:
+        osc_client.send_message(OSC_Path.ConnectionStatus, False)
         ### Cleanup ###
         board.stop_stream()
         board.release_session()
