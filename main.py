@@ -3,9 +3,11 @@ import time
 import enum
 import math
 import numpy as np
+import os
 
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, LogLevels, BoardIds
 from brainflow.data_filter import DataFilter, DetrendOperations, FilterTypes
+from brainflow.ml_model import MLModel, BrainFlowMetrics, BrainFlowClassifiers, BrainFlowModelParams
 
 from pythonosc.udp_client import SimpleUDPClient
 from scipy.signal import find_peaks
@@ -49,7 +51,7 @@ def main():
     DataFilter.enable_data_logger()
 
     ### Uncomment this to see debug messages ###
-    BoardShim.set_log_level(LogLevels.LEVEL_DEBUG.value)
+    # BoardShim.set_log_level(LogLevels.LEVEL_DEBUG.value)
 
     ### Paramater Setting ###
     parser = argparse.ArgumentParser()
@@ -135,6 +137,14 @@ def main():
     ring_buffer_size = max(eeg_window_size, heart_window_size) * sampling_rate
     startup_time = 5
     board_timeout = 5
+
+    ### ONNX Test Run ###
+    model_params = BrainFlowModelParams(BrainFlowMetrics.USER_DEFINED.value,
+                                        BrainFlowClassifiers.ONNX_CLASSIFIER.value)
+    model_params.file = os.path.join(
+        os.getcwd(), 'ml-spotify', 'spotify_emotion.onnx')
+    model = MLModel(model_params)
+    model.prepare()
 
     try:
         BoardShim.log_message(LogLevels.LEVEL_INFO.value, 'Intializing')
@@ -225,6 +235,12 @@ def main():
                     heart_bps = None
             ### END PPG SECTION ###
 
+            ### START ONNX SECTION ###
+            result = model.predict(feature_vector)
+            result = result * 2 - 1
+            [current_focus, current_relax] = result
+            ### END ONNX SECTION ###
+
             BoardShim.log_message(LogLevels.LEVEL_DEBUG.value, "Sending")
             osc_client.send_message(OSC_Path.Focus, current_focus)
             osc_client.send_message(OSC_Path.Relax, current_relax)
@@ -246,6 +262,7 @@ def main():
     finally:
         osc_client.send_message(OSC_Path.ConnectionStatus, False)
         ### Cleanup ###
+        model.release()
         board.stop_stream()
         board.release_session()
 
