@@ -17,7 +17,7 @@ This is my attempt at creating a machine learning algorithm to map brainwaves to
 Emotion can be described as a 2D space, where the the x axis is positivity/valence of the emotion and the y axis is the energy/arousal of the emotion.
 For example, relaxed can be described as a positive low energy emotion but excited can be described as a positive high energy emotion. This way of describing emotion results in two floats that can be sent to your VRChat avatar for various emotional animations.
 
-![Valence Arousal Diagram](https://www.researchgate.net/profile/Lung-Hao-Lee-2/publication/304124018/figure/fig1/AS:374864755085312@1466386130906/Two-dimensional-valence-arousal-space.png)
+![Valence Arousal Diagram](Two-dimensional-valence-arousal-space.png)
 
 ## Getting Started
 
@@ -60,3 +60,6 @@ For example, relaxed can be described as a positive low energy emotion but excit
 3. This will now start sending emotion data to VRChat OSC. This will replace the usual osc avatar paramaters. They will still have a range of [-1, 1]
    1. Emotion Energy => `/avatar/parameters/osc_relax_avg`
    2. Emotion Positivity => `/avatar/parameters/osc_focus_avg`
+
+## Citations
+- [Valence Arousal Diagram](https://www.researchgate.net/figure/Two-dimensional-valence-arousal-space_fig1_304124018)
