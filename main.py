@@ -13,6 +13,10 @@ from pythonosc.udp_client import SimpleUDPClient
 from scipy.signal import find_peaks
 
 
+START_FREQ = 2.0
+END_FREQ = 45.0
+
+
 class BAND_POWERS(enum.IntEnum):
     Gamma = 4
     Beta = 3
@@ -25,8 +29,6 @@ class OSC_Path:
     Relax = '/avatar/parameters/osc_relax_avg'
     Focus = '/avatar/parameters/osc_focus_avg'
     Battery = '/avatar/parameters/osc_battery_lvl'
-    HeartBps = '/avatar/parameters/osc_heart_bps'
-    HeartBpm = '/avatar/parameters/osc_heart_bpm'
     ConnectionStatus = '/avatar/parameters/osc_is_connected'
 
 
@@ -102,43 +104,27 @@ def main():
     eeg_channels = tryFunc(BoardShim.get_eeg_channels, master_board_id)
     sampling_rate = tryFunc(BoardShim.get_sampling_rate, master_board_id)
     battery_channel = tryFunc(BoardShim.get_battery_channel, master_board_id)
-    ppg_channels = tryFunc(BoardShim.get_ppg_channels, master_board_id)
     time_channel = tryFunc(BoardShim.get_timestamp_channel, master_board_id)
     board.prepare_session()
 
-    ### Biosensor device specific commands ###
-    if master_board_id == BoardIds.MUSE_2_BOARD or master_board_id == BoardIds.MUSE_S_BOARD:
-        board.config_board('p52')
-
     ### EEG Band Calculation Params ###
-    current_focus = 0
-    current_relax = 0
-    current_value = np.array([current_focus, current_relax])
     eeg_window_size = 2
 
     # normalize ratios between -1 and 1.
-    # Ratios are centered around 1.0. Tune scale to taste
-    normalize_offset = -1
+    # ONNX model range is [0,1] centered around 0.5. Tune scale to taste
+    normalize_offset = -0.5
     normalize_scale = 1.3
 
     # Smoothing params
-    smoothing_weight = 0.05
     detrend_eeg = True
-
-    ### PPG Params ###
-    heart_window_size = 10
-    heart_min_dist = 0.35
-    heart_lowpass_cutoff = 2
-    heart_lowpass_order = 2
-    heart_lowpass_ripple = 0
 
     ### Streaming Params ###
     update_speed = 1 / 4  # 4Hz update rate for VRChat OSC
-    ring_buffer_size = max(eeg_window_size, heart_window_size) * sampling_rate
+    ring_buffer_size = eeg_window_size * sampling_rate
     startup_time = 5
     board_timeout = 5
 
-    ### ONNX Test Run ###
+    ### ONNX Setup ###
     model_params = BrainFlowModelParams(BrainFlowMetrics.USER_DEFINED.value,
                                         BrainFlowClassifiers.ONNX_CLASSIFIER.value)
     model_params.file = os.path.join(
@@ -170,7 +156,7 @@ def main():
                 BoardShim.log_message(
                     LogLevels.LEVEL_DEBUG.value, "Battery: {}".format(battery_level))
 
-            ### START EEG SECTION ###
+            ### START ONNX SECTION ###
             BoardShim.log_message(
                 LogLevels.LEVEL_DEBUG.value, "Calculating Power Bands")
             if detrend_eeg:
@@ -181,75 +167,19 @@ def main():
                 data, eeg_channels, sampling_rate, True)
             feature_vector, _ = bands
 
-            BoardShim.log_message(
-                LogLevels.LEVEL_DEBUG.value, "Calculating Metrics")
-            numerator = np.array(
-                [feature_vector[BAND_POWERS.Beta], feature_vector[BAND_POWERS.Alpha]])
-            denominator = np.array(
-                [feature_vector[BAND_POWERS.Theta], feature_vector[BAND_POWERS.Theta]])
-            target_value = np.divide(numerator, denominator)
-            target_value = tanh_normalize(
-                target_value, normalize_scale, normalize_offset)
-            current_value = smooth(
-                current_value, target_value, smoothing_weight)
-
-            current_focus = current_value[0]
-            current_relax = current_value[1]
-
-            BoardShim.log_message(LogLevels.LEVEL_DEBUG.value, "Focus: {:.3f}\tRelax: {:.3f}".format(
+            prediction = model.predict(feature_vector)
+            prediction = tanh_normalize(
+                prediction, 2 * normalize_scale, normalize_offset)
+            current_focus = prediction[0]
+            current_relax = prediction[1]
+            BoardShim.log_message(LogLevels.LEVEL_DEBUG.value, "Arousal: {:.3f}\tValence: {:.3f}".format(
                 current_focus, current_relax))
-            ### END EEG SECTION ###
-
-            ### START PPG SECTION ###
-            if ppg_channels and time_channel:
-                BoardShim.log_message(
-                    LogLevels.LEVEL_DEBUG.value, "Get PPG Data")
-                data = board.get_current_board_data(
-                    heart_window_size * sampling_rate)
-                time_data = data[time_channel]
-                ir_data_channel = ppg_channels[1]
-                ambient_channel = ppg_channels[0]
-
-                BoardShim.log_message(
-                    LogLevels.LEVEL_DEBUG.value, "Clean PPG Signals")
-                ir_data = data[ir_data_channel] - data[ambient_channel]
-                ambient_filter = list(map(lambda sample: sample > 0, ir_data))
-                ir_data = ir_data[ambient_filter]
-                DataFilter.perform_lowpass(
-                    ir_data, sampling_rate, heart_lowpass_cutoff, heart_lowpass_order, FilterTypes.BUTTERWORTH.value, heart_lowpass_ripple)
-
-                BoardShim.log_message(
-                    LogLevels.LEVEL_DEBUG.value, "Find PPG Peaks")
-                peaks, _ = find_peaks(
-                    ir_data, distance=sampling_rate * heart_min_dist)
-                peaks = peaks[1:-1]
-
-                BoardShim.log_message(
-                    LogLevels.LEVEL_DEBUG.value, "Calculate Heart Rate")
-                heart_bps = 1 / np.mean(np.diff(time_data[peaks]))
-                if not math.isnan(heart_bps):
-                    heart_bpm = int(heart_bps * 60 + 0.5)
-                    BoardShim.log_message(
-                        LogLevels.LEVEL_DEBUG.value, "BPS: {:.3f}\tBPM: {}".format(heart_bps, heart_bpm))
-                else:
-                    heart_bps = None
-            ### END PPG SECTION ###
-
-            ### START ONNX SECTION ###
-            result = model.predict(feature_vector)
-            result = result * 2 - 1
-            [current_focus, current_relax] = result
             ### END ONNX SECTION ###
 
             BoardShim.log_message(LogLevels.LEVEL_DEBUG.value, "Sending")
             osc_client.send_message(OSC_Path.Focus, current_focus)
             osc_client.send_message(OSC_Path.Relax, current_relax)
             osc_client.send_message(OSC_Path.ConnectionStatus, True)
-            if battery_level:
-                osc_client.send_message(OSC_Path.Battery, battery_level)
-            if ppg_channels and heart_bps:
-                osc_client.send_message(OSC_Path.HeartBps, heart_bps)
-                osc_client.send_message(OSC_Path.HeartBpm, heart_bpm)
 
             BoardShim.log_message(LogLevels.LEVEL_DEBUG.value, "Sleeping")
             time.sleep(update_speed)
