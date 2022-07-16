@@ -1,6 +1,6 @@
 # Spotify Emotion to VRChat OSC
 
-This is my attempt at creating a machine learning algorithm to map brainwaves to emotional response using Spotify's emotion metadata, Pytorch's machine learning library, Brainflow's ONNX integration, and VRChat OSC.
+This is my attempt at creating a machine learning algorithm to map brainwaves to emotional response using [Spotify's emotion metadata](https://developer.spotify.com/documentation/web-api/reference/#/operations/get-audio-features), [Pytorch's machine learning library](https://pytorch.org), [Brainflow's ONNX integration](https://brainflow.org/2022-06-09-onnx/), and [VRChat OSC](https://hello.vrchat.com/blog/vrchat-osc-for-avatars).
 
 ## How it works
 
