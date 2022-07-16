@@ -1,4 +1,4 @@
-ml-spotify/*.pkl
-ml-spotify/*.onnx
+*.pkl
+*.onnx
 **/*.cache
 **/*.pyc
