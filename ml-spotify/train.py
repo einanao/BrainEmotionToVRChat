@@ -1,64 +1,115 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import pickle
 import random
+import numpy as np
 
-from pprint import pprint
 from model import Model
 import matplotlib.pyplot as plt
 
+from brainflow.board_shim import BoardShim
+from brainflow.data_filter import DataFilter, DetrendOperations
+
 SAVE_PATH = 'recording.pkl'
-SAMPLING_RATE = 250
-NUM_LAYERS = 2
+BOARD_ID = 7
+WINDOW_SECOND = 2
+START_SEC = 0
 
-window = 2 * SAMPLING_RATE
+# Values from range of frequencies found in get_avg_band_powers
+START_FREQ = 2.0
+END_FREQ = 45.0
 
-save_dict = {}
 with open(SAVE_PATH, 'rb') as f:
-    save_dict = pickle.load(f)
-entries = [entry for entry in save_dict.values() if len(
-    entry['feature_avgs']) > window]
-select_sample_count = 5000
-print('select_sample_count', select_sample_count)
+    record_data = pickle.load(f)
+sampling_rate = record_data[0]['sampling_rate']
+window = WINDOW_SECOND * sampling_rate
 
+eeg_channels = BoardShim.get_eeg_channels(BOARD_ID)
+sampling_rate = BoardShim.get_sampling_rate(BOARD_ID)
+
+
+### Create Data ###
+
+# Clean eeg signals
+for entry in record_data:
+    data = entry['board_data']
+    for eeg_channel in eeg_channels:
+        # DataFilter.perform_bandpass(data[eeg_channel], sampling_rate, START_FREQ, END_FREQ, 4,
+        #                             FilterTypes.BUTTERWORTH.value, 0)
+        DataFilter.detrend(data[eeg_channel],
+                           DetrendOperations.LINEAR)
+
+minimum_sample_size = min(
+    [len(entry['board_data'][eeg_channels[0]]) for entry in record_data])
+
+
+# Batch creation
+start_idx = START_SEC * sampling_rate
+end_idx = minimum_sample_size - window
+
+
+def get_feature_vector(data):
+    feature_vector, _ = DataFilter.get_avg_band_powers(
+        data, eeg_channels, sampling_rate, True)
+    return feature_vector
+
+
+test_entries = []
+for entry in record_data:
+    data = entry['board_data']
+    data_windows = [np.array([data_row[i: i + window] for data_row in data])
+                    for i in range(start_idx, end_idx)]
+    target_emotion = entry['emotion']
+    target_emotions = [target_emotion] * len(data_windows)
+    test_entries.extend(list(zip(target_emotions, data_windows)))
+
+# test_entries = random.sample(test_entries, 10000)
+random.shuffle(test_entries)
+
+
+def batch(iterable, n=1):
+    l = len(iterable)
+    for ndx in range(0, l, n):
+        yield iterable[ndx:min(ndx + n, l)]
+
+
+bsize = 100
+test_batches = batch(test_entries, bsize)
+batches_count = int(len(test_entries)/bsize)
+
+# create model
 model = Model()
 loss_function = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 loss_list = []
 
-for i in range(select_sample_count):
-    entry = random.choice(entries)
+for i, test_batch in enumerate(test_batches):
 
-    # Getting target tensor
-    audio_analysis = entry['audio_analysis'][0]
-    target = torch.Tensor(
-        [audio_analysis['valence'], audio_analysis['energy']])
-    target = target.view(1, -1)
+    # get batch and format for pytorch
+    target_emotions, data_windows = zip(*test_batch)
+    feature_vectors = [get_feature_vector(
+        data_window) for data_window in data_windows]
 
-    # Getting input tensor
-    input_tensor = random.choice(entry['feature_avgs'])
-    input_tensor = torch.Tensor(input_tensor).view(1, -1)
+    targets = torch.Tensor(target_emotions).view(len(target_emotions), 1, 2)
+    inputs = torch.Tensor(feature_vectors).view(len(feature_vectors), 1, 5)
 
-    # training time
+    # Training
     model.zero_grad()
-    output = model(input_tensor)
-
-    loss = loss_function(output, target)
+    outputs = model(inputs)
+    loss = loss_function(outputs, targets)
     loss.backward()
     optimizer.step()
 
-    print(i, output, target, loss.item())
+    print(i, batches_count, loss.item(), target_emotions[0], outputs[0])
     loss_list.append(loss.item())
-    if loss.item() < .005 and i > 500:
+
+    if loss.item() < 0.24:
         break
+
+# Save as ONNX model
+dummy_input = inputs[0]
+torch.onnx.export(model, dummy_input, "spotify_emotion.onnx")
 
 plt.plot(loss_list)
 plt.show()
-
-torch.onnx.export(model, input_tensor, "spotify_emotion.onnx")
-
-# for entry in entries:
-#     print(len(entry['feature_avgs']))
-# print(len(entries))
