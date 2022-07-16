@@ -104,7 +104,7 @@ for i, test_batch in enumerate(test_batches):
     print(i, batches_count, loss.item(), target_emotions[0], outputs[0])
     loss_list.append(loss.item())
 
-    if loss.item() < 0.24:
+    if loss.item() < 0.05:
         break
 
 # Save as ONNX model
