@@ -61,5 +61,9 @@ For example, relaxed can be described as a positive low energy emotion but excit
    1. Emotion Energy => `/avatar/parameters/osc_relax_avg`
    2. Emotion Positivity => `/avatar/parameters/osc_focus_avg`
 
+## Caveats
+
+I suck at machine learning, so the custom machine learning model included is not performant at all. In the next coming months, I'll be updating this with the help of my more experienced friends to see where this could go. This is more proof of concept that the pipeline to add machine learning works!
+
 ## Citations
 - [Valence Arousal Diagram](https://www.researchgate.net/figure/Two-dimensional-valence-arousal-space_fig1_304124018)
