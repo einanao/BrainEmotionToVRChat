@@ -84,6 +84,9 @@ loss_function = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 loss_list = []
 
+test_batches = list(test_batches)
+target_var = np.var([list(zip(*test_batch))[0][0] for test_batch in test_batches])
+
 for i, test_batch in enumerate(test_batches):
 
     # get batch and format for pytorch
@@ -101,11 +104,11 @@ for i, test_batch in enumerate(test_batches):
     loss.backward()
     optimizer.step()
 
-    print(i, batches_count, loss.item(), target_emotions[0], outputs[0])
+    print(i, batches_count, loss.item() / target_var, target_emotions[0], outputs[0])
     loss_list.append(loss.item())
 
-    if loss.item() < 0.05:
-        break
+    #if loss.item() < 0.05:
+    #    break
 
 # Save as ONNX model
 dummy_input = inputs[0]
