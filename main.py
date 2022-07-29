@@ -127,8 +127,7 @@ def main():
     ### ONNX Setup ###
     model_params = BrainFlowModelParams(BrainFlowMetrics.USER_DEFINED.value,
                                         BrainFlowClassifiers.ONNX_CLASSIFIER.value)
-    model_params.file = os.path.join(
-        os.getcwd(), 'ml-spotify', 'spotify_emotion.onnx')
+    model_params.file = os.path.join(os.getcwd(), 'spotify_emotion.onnx')
     model = MLModel(model_params)
     model.prepare()
 
