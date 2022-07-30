@@ -86,9 +86,9 @@ def converged(val_losses, ftol=1e-6, min_iters=2, eps=1e-9):
       (eps + abs(val_losses[-2])) < ftol)
 
 batch_size = 32 # training batch size
-val_freq = 100 # after every val_freq gradient steps, compute validation loss
+val_freq = 1000 # after every val_freq gradient steps, compute validation loss
 train_frac = 0.9 # fraction of dataset to allocate to training set (rest is allocated to validation set)
-n_epochs = 10 # number of passes through the training set
+n_epochs = 100 # number of passes through the training set
 
 # create model
 model = Model()
