@@ -85,15 +85,15 @@ def converged(val_losses, ftol=1e-6, min_iters=2, eps=1e-9):
       val_losses[-1] == np.nan or abs(val_losses[-1] - val_losses[-2]) /
       (eps + abs(val_losses[-2])) < ftol)
 
-batch_size = 100 # training batch size
-val_freq = 10 # after every val_freq gradient steps, compute validation loss
+batch_size = 32 # training batch size
+val_freq = 100 # after every val_freq gradient steps, compute validation loss
 train_frac = 0.9 # fraction of dataset to allocate to training set (rest is allocated to validation set)
 n_epochs = 10 # number of passes through the training set
 
 # create model
 model = Model()
 loss_function = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=3e-4) # :P. see "adam is safe" https://karpathy.github.io/2019/04/25/recipe/
 
 train_losses = []
 val_losses = []
