@@ -54,65 +54,101 @@ def get_feature_vector(data):
         data, eeg_channels, sampling_rate, True)
     return feature_vector
 
-
-test_entries = []
+X = [] # inputs
+Y = [] # targets
 for entry in record_data:
     data = entry['board_data']
     data_windows = [np.array([data_row[i: i + window] for data_row in data])
                     for i in range(start_idx, end_idx)]
     target_emotion = entry['emotion']
     target_emotions = [target_emotion] * len(data_windows)
-    test_entries.extend(list(zip(target_emotions, data_windows)))
+    feature_vectors = [get_feature_vector(
+        data_window) for data_window in data_windows]
 
-# test_entries = random.sample(test_entries, 10000)
-random.shuffle(test_entries)
+    X.extend(feature_vectors)
+    Y.extend(target_emotions)
+X = np.array(X)
+Y = np.array(Y)
+print('dataset shape: ', X.shape, Y.shape)
 
+n = X.shape[0]
+idxes = np.arange(0, n, 1)
+np.random.shuffle(idxes)
+X = X[idxes]
+Y = Y[idxes]
 
-def batch(iterable, n=1):
-    l = len(iterable)
-    for ndx in range(0, l, n):
-        yield iterable[ndx:min(ndx + n, l)]
+with open('dataset.pkl', 'wb') as f:
+  pickle.dump((X, Y), f, pickle.HIGHEST_PROTOCOL)
 
+def converged(val_losses, ftol=1e-6, min_iters=2, eps=1e-9):
+  return len(val_losses) >= max(2, min_iters) and (
+      val_losses[-1] == np.nan or abs(val_losses[-1] - val_losses[-2]) /
+      (eps + abs(val_losses[-2])) < ftol)
 
-bsize = 100
-test_batches = batch(test_entries, bsize)
-batches_count = int(len(test_entries)/bsize)
+batch_size = 100 # training batch size
+val_freq = 10 # after every val_freq gradient steps, compute validation loss
+train_frac = 0.9 # fraction of dataset to allocate to training set (rest is allocated to validation set)
+n_epochs = 10 # number of passes through the training set
 
 # create model
 model = Model()
 loss_function = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
-loss_list = []
 
-test_batches = list(test_batches)
-target_var = np.var([list(zip(*test_batch))[0][0] for test_batch in test_batches])
+train_losses = []
+val_losses = []
+val_loss_steps = []
+target_var = np.var(Y)
+n_train_idxes = int(train_frac * n)
+train_idxes = idxes[:n_train_idxes]
+val_idxes = idxes[n_train_idxes:]
+n_batches = int(np.ceil(n_train_idxes / batch_size))
 
-for i, test_batch in enumerate(test_batches):
-
+def eval_loss(batch_idxes, train=True):
     # get batch and format for pytorch
-    target_emotions, data_windows = zip(*test_batch)
-    feature_vectors = [get_feature_vector(
-        data_window) for data_window in data_windows]
+    X_batch = X[batch_idxes]
+    Y_batch = Y[batch_idxes]
 
-    targets = torch.Tensor(target_emotions).view(len(target_emotions), 1, 2)
-    inputs = torch.Tensor(feature_vectors).view(len(feature_vectors), 1, 5)
+    targets = torch.Tensor(Y_batch).view(len(Y_batch), 1, 2)
+    inputs = torch.Tensor(X_batch).view(len(X_batch), 1, 5)
 
     # Training
     model.zero_grad()
     outputs = model(inputs)
     loss = loss_function(outputs, targets)
     loss.backward()
-    optimizer.step()
+    if train:
+      optimizer.step()
 
-    print(i, batches_count, loss.item() / target_var, target_emotions[0], outputs[0])
-    loss_list.append(loss.item())
+    return loss.item() / target_var
 
-    #if loss.item() < 0.05:
-    #    break
+last_epoch = False
+val_loss = None
+for i in range(n_epochs):
+    j = 0
+    while j < n_train_idxes:
+        train_batch_idxes = train_idxes[j:j+batch_size]
+        train_loss = eval_loss(train_batch_idxes, train=True)
+        train_losses.append(train_loss)
+        if len(train_losses) % val_freq == 0:
+            val_loss = eval_loss(val_idxes, train=False)
+            val_losses.append(val_loss)
+            val_loss_steps.append(len(train_losses))
+        print(i, n_epochs, j // batch_size, n_batches, train_loss, val_loss)
+        if converged(val_losses):
+            last_epoch = True
+            break
+        j += batch_size
+    if last_epoch:
+        break
 
 # Save as ONNX model
-dummy_input = inputs[0]
+dummy_input = torch.Tensor(X[:1]).view(1, 1, 5)[0]
 torch.onnx.export(model, dummy_input, "spotify_emotion.onnx")
 
-plt.plot(loss_list)
+plt.xlabel('gradient steps')
+plt.ylabel('loss')
+plt.plot(train_losses, label='training set')
+plt.plot(val_loss_steps, val_losses, label='validation set')
+plt.legend(loc='best')
 plt.show()
