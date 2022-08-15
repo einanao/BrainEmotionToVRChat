@@ -61,6 +61,13 @@ For example, relaxed can be described as a positive low energy emotion but excit
    1. Emotion Energy => `/avatar/parameters/osc_relax_avg`
    2. Emotion Positivity => `/avatar/parameters/osc_focus_avg`
 
+## Extras
+
+1. Complete the steps above for `Training the model`
+2. Run this command: `jupyter notebook`
+3. Open [http://localhost:8888/notebooks/viz-and-modeling.ipynb](http://localhost:8888/notebooks/viz-and-modeling.ipynb) in a web browser
+4. Run the cells in the notebook to visualize a [UMAP](https://arxiv.org/abs/1802.03426) embedding of the EEG signals in `dataset.pkl`. The notebook also contains code for training a random forest regression model, performing cross-validation, and computing training error. 
+
 ## Caveats
 
 I suck at machine learning, so the custom machine learning model included is not performant at all. In the next coming months, I'll be updating this with the help of my more experienced friends to see where this could go. This is more proof of concept that the pipeline to add machine learning works!
