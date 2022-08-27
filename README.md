@@ -45,6 +45,10 @@ For example, relaxed can be described as a positive low energy emotion but excit
 5. Run this command `python record_eeg.py --board-id BOARD_ID --spotify-device-id DEVICE_ID` , replacing `BOARD_ID` with your board ID and `DEVICE_ID` with your Spotify Device ID
 6. Lay back and listen to the music. The script will automatically play sections of music at random, pausing for 5 seconds in between, and recording your brainwaves.
 
+## Loading pre-recorded EEG data
+
+1. Download [recording.pkl](https://www.dropbox.com/sh/b90zffeybku00ul/AADcUlCrNrZITlXGl10Xr7qta?dl=0)
+
 ## Training the model
 
 1. Make sure to have completed steps for `Recording EEG Data while listening to Spotify` 
